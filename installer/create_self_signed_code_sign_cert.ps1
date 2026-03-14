@@ -13,13 +13,13 @@ if (-not $OutputDir) {
 
 New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
 
-$Cert = New-SelfSignedCertificate \
-    -Subject $Subject \
-    -Type CodeSigningCert \
-    -CertStoreLocation 'Cert:\CurrentUser\My' \
-    -KeyAlgorithm RSA \
-    -KeyLength 4096 \
-    -HashAlgorithm SHA256 \
+$Cert = New-SelfSignedCertificate `
+    -Subject $Subject `
+    -Type CodeSigningCert `
+    -CertStoreLocation 'Cert:\CurrentUser\My' `
+    -KeyAlgorithm RSA `
+    -KeyLength 4096 `
+    -HashAlgorithm SHA256 `
     -NotAfter (Get-Date).AddYears(3)
 
 $SecurePassword = ConvertTo-SecureString -String $Password -AsPlainText -Force
