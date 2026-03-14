@@ -1,5 +1,8 @@
 from functools import lru_cache
 from pathlib import Path
+import shutil
+import subprocess
+from threading import Lock, Thread
 
 import numpy as np
 import torch
@@ -8,9 +11,56 @@ from PIL import Image
 from app.config import settings
 
 
+_MODEL_STATUS_LOCK = Lock()
+_MODEL_STATUS: dict[str, object] = {
+    "started": False,
+    "loading": False,
+    "loaded": False,
+    "dtype": None,
+    "error": None,
+}
+
+
 @lru_cache(maxsize=1)
 def get_runtime_device() -> str:
-    return "cuda" if settings.device == "cuda" and torch.cuda.is_available() else "cpu"
+    preferred = settings.device.lower()
+    if preferred == "cpu":
+        return "cpu"
+    return "cuda" if torch.cuda.is_available() else "cpu"
+
+
+@lru_cache(maxsize=1)
+def get_detected_gpu_name() -> str | None:
+    if torch.cuda.is_available():
+        try:
+            return torch.cuda.get_device_name(0)
+        except Exception:
+            return "CUDA GPU"
+    if shutil.which("nvidia-smi"):
+        try:
+            output = subprocess.check_output(
+                ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                text=True,
+                stderr=subprocess.DEVNULL,
+            ).strip()
+            if output:
+                return output.splitlines()[0].strip()
+        except Exception:
+            return None
+    return None
+
+
+@lru_cache(maxsize=1)
+def get_device_reason() -> str:
+    preferred = settings.device.lower()
+    if preferred == "cpu":
+        return "設定により CPU を使用しています。"
+    if torch.cuda.is_available():
+        return "利用可能な GPU を優先して使用しています。"
+    detected_gpu = get_detected_gpu_name()
+    if detected_gpu:
+        return "GPU は検出されていますが、CUDA 対応の PyTorch ランタイムが使えていないため CPU を使用しています。Install / Repair を再実行してください。"
+    return "利用可能な GPU ランタイムが見つからないため CPU を使用しています。"
 
 
 @lru_cache(maxsize=1)
@@ -27,32 +77,76 @@ def get_model_bundle():
     return model, preprocess, tokenizer
 
 
+def _base_status() -> dict:
+    return {
+        "device": get_runtime_device(),
+        "model_name": settings.clip_model_name,
+        "pretrained": settings.clip_pretrained,
+        "gpu_name": get_detected_gpu_name(),
+        "device_reason": get_device_reason(),
+    }
+
+
+def _load_model_in_background() -> None:
+    try:
+        model, _, _ = get_model_bundle()
+        dtype = str(next(model.parameters()).dtype)
+        with _MODEL_STATUS_LOCK:
+            _MODEL_STATUS.update(
+                {
+                    "started": True,
+                    "loading": False,
+                    "loaded": True,
+                    "dtype": dtype,
+                    "error": None,
+                }
+            )
+    except Exception as exc:
+        with _MODEL_STATUS_LOCK:
+            _MODEL_STATUS.update(
+                {
+                    "started": True,
+                    "loading": False,
+                    "loaded": False,
+                    "dtype": None,
+                    "error": str(exc),
+                }
+            )
+
+
+def start_model_warmup() -> None:
+    with _MODEL_STATUS_LOCK:
+        if _MODEL_STATUS["loading"] or _MODEL_STATUS["loaded"]:
+            return
+        _MODEL_STATUS.update(
+            {
+                "started": True,
+                "loading": True,
+                "loaded": False,
+                "dtype": None,
+                "error": None,
+            }
+        )
+    Thread(target=_load_model_in_background, daemon=True).start()
+
+
 def _normalize(vector: np.ndarray) -> np.ndarray:
     norm = np.linalg.norm(vector)
     return vector if norm == 0 else vector / norm
 
 
-@lru_cache(maxsize=1)
 def get_model_status() -> dict:
-    device = get_runtime_device()
-    try:
-        model, _, _ = get_model_bundle()
-        dtype = str(next(model.parameters()).dtype)
-        return {
-            "device": device,
-            "model_name": settings.clip_model_name,
-            "pretrained": settings.clip_pretrained,
-            "loaded": True,
-            "dtype": dtype,
-        }
-    except Exception as exc:
-        return {
-            "device": device,
-            "model_name": settings.clip_model_name,
-            "pretrained": settings.clip_pretrained,
-            "loaded": False,
-            "error": str(exc),
-        }
+    start_model_warmup()
+    with _MODEL_STATUS_LOCK:
+        status = dict(_MODEL_STATUS)
+    return {
+        **_base_status(),
+        "started": bool(status["started"]),
+        "loading": bool(status["loading"]),
+        "loaded": bool(status["loaded"]),
+        "dtype": status["dtype"],
+        "error": status["error"],
+    }
 
 
 def build_text_embedding(text: str) -> np.ndarray:

@@ -6,7 +6,19 @@
   <title>UploadPicker</title>
   <link rel="stylesheet" href="/static/app.css">
 </head>
-<body>
+<body data-model-loading="{{ 'true' if model_status.loading else 'false' }}">
+  <div id="model-loading-overlay" class="loading-overlay{% if not model_status.loading %} hidden{% endif %}" aria-live="polite" aria-busy="{{ 'true' if model_status.loading else 'false' }}">
+    <div class="loading-card stack-sm">
+      <strong>画像認識AIをロード中</strong>
+      <span id="model-loading-message">モデルの初期化が終わるまでお待ちください。</span>
+      <span class="loading-meta">{{ model_status.model_name }} / {{ model_status.pretrained }} / {{ model_status.device }}</span>
+      {% if model_status.error %}
+      <div class="error-text" id="model-loading-error">{{ model_status.error }}</div>
+      {% else %}
+      <div class="loading-spinner" aria-hidden="true"></div>
+      {% endif %}
+    </div>
+  </div>
   <main class="page">
     <section class="hero">
       <div>
@@ -16,24 +28,46 @@
       </div>
       <div class="status-card">
         <div class="status-row"><span>Device</span><strong>{{ model_status.device }}</strong></div>
+        {% if model_status.gpu_name %}
+        <div class="status-row"><span>GPU</span><strong>{{ model_status.gpu_name }}</strong></div>
+        {% endif %}
         <div class="status-row"><span>Model</span><strong>{{ model_status.model_name }}</strong></div>
         <div class="status-row"><span>Pretrained</span><strong>{{ model_status.pretrained }}</strong></div>
+        <div class="status-row"><span>Loading</span><strong>{{ model_status.loading }}</strong></div>
         <div class="status-row"><span>Loaded</span><strong>{{ model_status.loaded }}</strong></div>
         {% if model_status.dtype %}
         <div class="status-row"><span>DType</span><strong>{{ model_status.dtype }}</strong></div>
         {% endif %}
+        <div class="helper-text">{{ model_status.device_reason }}</div>
         {% if model_status.error %}
         <div class="error-text">{{ model_status.error }}</div>
         {% endif %}
       </div>
     </section>
 
+    {% if notice %}
+    <section class="panel notice-banner">
+      <strong>{{ notice }}</strong>
+    </section>
+    {% endif %}
+
     <section class="panel two-column">
-      <form class="stack" action="/upload" method="post" enctype="multipart/form-data">
+      <div class="stack">
         <h2>アップロード</h2>
-        <input type="file" name="file" accept="image/*" required>
-        <button type="submit">アップロードして登録</button>
-      </form>
+        <form class="stack-sm" action="/upload" method="post" enctype="multipart/form-data">
+          <input type="file" name="file" accept="image/*" required>
+          <button type="submit">画像を1枚アップロード</button>
+        </form>
+        <form class="stack-sm" action="/upload-batch" method="post" enctype="multipart/form-data">
+          <input type="file" name="files" accept="image/*" multiple required>
+          <button type="submit">画像をまとめてアップロード</button>
+        </form>
+        <form class="stack-sm" action="/upload-batch" method="post" enctype="multipart/form-data">
+          <input type="file" name="files" accept="image/*" webkitdirectory directory multiple required>
+          <button type="submit">フォルダごとアップロード</button>
+        </form>
+        <span class="helper-text">複数画像を選ぶか、フォルダを丸ごと選んで一括登録できます。</span>
+      </div>
 
       <form class="stack" action="/search" method="post">
         <h2>検索</h2>
@@ -45,9 +79,22 @@
     </section>
 
     <section class="panel stack">
-      <form action="/reindex" method="post">
-        <button class="button-secondary" type="submit">全件再インデックス</button>
-      </form>
+      <div class="section-head">
+        <h2>画像フォルダ取り込み</h2>
+        <span>{{ library_dir }}</span>
+      </div>
+      <p class="subtitle compact">画像をこのフォルダへまとめて入れてから取り込みボタンを押すと、一括で検索対象に登録できます。</p>
+      <div class="action-grid">
+        <form action="/open-image-folder" method="post">
+          <button class="button-secondary" type="submit">画像フォルダを開く</button>
+        </form>
+        <form action="/import-folder-images" method="post">
+          <button class="button-secondary" type="submit">フォルダ内画像を取り込む</button>
+        </form>
+        <form action="/reindex" method="post">
+          <button class="button-secondary" type="submit">全件再インデックス</button>
+        </form>
+      </div>
     </section>
 
     {% if search_results %}
@@ -100,5 +147,54 @@
       </div>
     </section>
   </main>
+  <script>
+    const overlay = document.getElementById('model-loading-overlay');
+    const loadingMessage = document.getElementById('model-loading-message');
+    const pollingIntervalMs = 1500;
+
+    async function refreshModelStatus() {
+      const response = await fetch('/api/model-status', { cache: 'no-store' });
+      if (!response.ok) {
+        throw new Error('model status request failed');
+      }
+      return response.json();
+    }
+
+    function applyModelStatus(status) {
+      if (!overlay) {
+        return;
+      }
+      const isLoading = Boolean(status.loading);
+      document.body.dataset.modelLoading = isLoading ? 'true' : 'false';
+      overlay.classList.toggle('hidden', !isLoading);
+      overlay.setAttribute('aria-busy', isLoading ? 'true' : 'false');
+      if (loadingMessage) {
+        if (status.error) {
+          loadingMessage.textContent = 'モデル読み込みに失敗しました。画面を再読み込みして再試行してください。';
+        } else if (isLoading) {
+          loadingMessage.textContent = 'モデルの初期化が終わるまでお待ちください。';
+        } else {
+          loadingMessage.textContent = 'モデルの読み込みが完了しました。';
+        }
+      }
+    }
+
+    async function pollModelStatus() {
+      if (!overlay || document.body.dataset.modelLoading !== 'true') {
+        return;
+      }
+      try {
+        const status = await refreshModelStatus();
+        applyModelStatus(status);
+        if (status.loading) {
+          window.setTimeout(pollModelStatus, pollingIntervalMs);
+        }
+      } catch (_) {
+        window.setTimeout(pollModelStatus, pollingIntervalMs);
+      }
+    }
+
+    pollModelStatus();
+  </script>
 </body>
 </html>

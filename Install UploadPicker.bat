@@ -49,6 +49,15 @@ if errorlevel 1 (
     exit /b 1
 )
 
+where nvidia-smi >nul 2>nul
+if not errorlevel 1 (
+    echo NVIDIA GPU detected. Installing CUDA-enabled PyTorch runtime...
+    "%PYTHON_EXE%" -m pip install --upgrade torch torchvision --index-url https://download.pytorch.org/whl/cu124
+    if errorlevel 1 (
+        echo CUDA-enabled PyTorch install failed. Continuing with default Python package install.
+    )
+)
+
 pushd "%PROJECT_ROOT%"
 "%PYTHON_EXE%" -m pip install -e .
 popd
