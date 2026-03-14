@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>UploadPicker</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">Local GPU-ready hybrid image search</p>
+        <h1>UploadPicker</h1>
+        <p class="subtitle">アップロードした写真の中から、自然文と条件指定で候補をピックアップします。</p>
+      </div>
+      <div class="status-card">
+        <div class="status-row"><span>Device</span><strong>{{ model_status.device }}</strong></div>
+        <div class="status-row"><span>Model</span><strong>{{ model_status.model_name }}</strong></div>
+        <div class="status-row"><span>Pretrained</span><strong>{{ model_status.pretrained }}</strong></div>
+        <div class="status-row"><span>Loaded</span><strong>{{ model_status.loaded }}</strong></div>
+        {% if model_status.dtype %}
+        <div class="status-row"><span>DType</span><strong>{{ model_status.dtype }}</strong></div>
+        {% endif %}
+        {% if model_status.error %}
+        <div class="error-text">{{ model_status.error }}</div>
+        {% endif %}
+      </div>
+    </section>
+
+    <section class="panel two-column">
+      <form class="stack" action="/upload" method="post" enctype="multipart/form-data">
+        <h2>アップロード</h2>
+        <input type="file" name="file" accept="image/*" required>
+        <button type="submit">アップロードして登録</button>
+-        <button type="submit" formaction="/reindex" formmethod="post">全件再インデックス</button>
+      </form>
+
+      <form class="stack" action="/search" method="post">
+        <h2>検索</h2>
+        <input type="text" name="query" placeholder="例: やわらかい雰囲気の人物、カジュアルで明るい写真" value="{{ query }}" required>
+        <label class="check"><input type="checkbox" name="people_only" {% if people_only %}checked{% endif %}> 人物ありのみ</label>
+        <label class="check"><input type="checkbox" name="face_only" {% if face_only %}checked{% endif %}> 顔ありのみ</label>
+        <button type="submit">検索する</button>
+      </form>
+    </section>
+
+    <section class="panel stack">
+      <form action="/reindex" method="post">
+        <button class="button-secondary" type="submit">全件再インデックス</button>
+      </form>
+    </section>
+
+    {% if search_results %}
+    <section class="panel stack">
+      <div class="section-head">
+        <h2>検索結果</h2>
+        <span>{{ search_results.total }}件</span>
+      </div>
+      <div class="grid results-grid">
+        {% for item in search_results.results %}
+        <article class="card image-card">
+          <img src="{{ item.thumbnail_url }}" alt="{{ item.original_name }}">
+          <div class="card-body stack-sm">
+            <strong>{{ item.original_name }}</strong>
+            <span>score: {{ '%.4f'|format(item.similarity) }}</span>
+            <span>{{ item.caption }}</span>
+            <div class="tag-row">
+              {% for tag in item.auto_tags %}<span class="tag">{{ tag }}</span>{% endfor %}
+              {% for tag in item.manual_tags %}<span class="tag manual">{{ tag }}</span>{% endfor %}
+            </div>
+          </div>
+        </article>
+        {% endfor %}
+      </div>
+    </section>
+    {% endif %}
+
+    <section class="panel stack">
+      <div class="section-head">
+        <h2>登録済み画像</h2>
+        <span>{{ photos|length }}枚</span>
+      </div>
+      <div class="grid library-grid">
+        {% for photo in photos %}
+        {% set document = documents.get(photo.id) %}
+        <article class="card image-card">
+          <img src="/assets/thumbnails/{{ photo.stored_name }}" alt="{{ photo.original_name }}">
+          <div class="card-body stack-sm">
+            <strong>{{ photo.original_name }}</strong>
+            <span>{{ photo.width }} x {{ photo.height }}</span>
+            {% if document %}
+            <span>{{ document.caption }}</span>
+            <div class="tag-row">
+              {% for tag in document.auto_tags.split(',') if tag.strip() %}<span class="tag">{{ tag.strip() }}</span>{% endfor %}
+            </div>
+            {% endif %}
+          </div>
+        </article>
+        {% endfor %}
+      </div>
+    </section>
+  </main>
+</body>
+</html>
