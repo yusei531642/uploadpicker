@@ -15,35 +15,12 @@ set "MENU_MENU=%START_MENU_DIR%\UploadPicker.bat"
 set "MENU_START=%START_MENU_DIR%\Start UploadPicker.bat"
 set "MENU_UNINSTALL=%START_MENU_DIR%\Uninstall UploadPicker.bat"
 
-where py >nul 2>nul
-if not errorlevel 1 goto use_py_launcher
-
-where python >nul 2>nul
-if not errorlevel 1 goto use_python
-
-echo Python was not found. Installing Python 3.11 via winget...
-winget install --exact --id Python.Python.3.11 --accept-package-agreements --accept-source-agreements
+call :resolve_python
 if errorlevel 1 (
-    echo Failed to install Python.
+    echo Failed to find or install a usable Python runtime.
     pause
     exit /b 1
 )
-set "PYTHON_BOOTSTRAP_EXE=py"
-set "PYTHON_BOOTSTRAP_ARGS=-3.11"
-goto python_ready
-
-:use_py_launcher
-set "PYTHON_BOOTSTRAP_EXE=py"
-set "PYTHON_BOOTSTRAP_ARGS=-3.11"
-py -3.11 --version >nul 2>nul
-if errorlevel 1 set "PYTHON_BOOTSTRAP_ARGS=-3"
-goto python_ready
-
-:use_python
-set "PYTHON_BOOTSTRAP_EXE=python"
-set "PYTHON_BOOTSTRAP_ARGS="
-
-:python_ready
 
 echo Using Python command: %PYTHON_BOOTSTRAP_EXE% %PYTHON_BOOTSTRAP_ARGS%
 
@@ -54,6 +31,13 @@ if not exist "%VENV_DIR%" (
         pause
         exit /b 1
     )
+)
+
+if not exist "%PYTHON_EXE%" (
+    echo Virtual environment was created incompletely.
+    echo Missing: %PYTHON_EXE%
+    pause
+    exit /b 1
 )
 
 if exist "%ENV_EXAMPLE%" if not exist "%ENV_FILE%" copy "%ENV_EXAMPLE%" "%ENV_FILE%" >nul
@@ -92,3 +76,64 @@ if not exist "%START_MENU_DIR%" mkdir "%START_MENU_DIR%"
 echo Install completed.
 pause
 endlocal
+
+goto :eof
+
+:resolve_python
+where py >nul 2>nul
+if not errorlevel 1 (
+    py -0p 2>nul | findstr /i /c:"3.11" >nul
+    if not errorlevel 1 (
+        set "PYTHON_BOOTSTRAP_EXE=py"
+        set "PYTHON_BOOTSTRAP_ARGS=-3.11"
+        exit /b 0
+    )
+    py -0p 2>nul | findstr /r /c:" -3\.[0-9]" >nul
+    if not errorlevel 1 (
+        set "PYTHON_BOOTSTRAP_EXE=py"
+        set "PYTHON_BOOTSTRAP_ARGS=-3"
+        exit /b 0
+    )
+)
+
+where python >nul 2>nul
+if not errorlevel 1 (
+    python --version >nul 2>nul
+    if not errorlevel 1 (
+        set "PYTHON_BOOTSTRAP_EXE=python"
+        set "PYTHON_BOOTSTRAP_ARGS="
+        exit /b 0
+    )
+)
+
+echo Python runtime was not found. Installing Python 3.11 via winget...
+winget install --exact --id Python.Python.3.11 --accept-package-agreements --accept-source-agreements
+if errorlevel 1 exit /b 1
+
+where py >nul 2>nul
+if not errorlevel 1 (
+    py -0p 2>nul | findstr /i /c:"3.11" >nul
+    if not errorlevel 1 (
+        set "PYTHON_BOOTSTRAP_EXE=py"
+        set "PYTHON_BOOTSTRAP_ARGS=-3.11"
+        exit /b 0
+    )
+    py -0p 2>nul | findstr /r /c:" -3\.[0-9]" >nul
+    if not errorlevel 1 (
+        set "PYTHON_BOOTSTRAP_EXE=py"
+        set "PYTHON_BOOTSTRAP_ARGS=-3"
+        exit /b 0
+    )
+)
+
+where python >nul 2>nul
+if not errorlevel 1 (
+    python --version >nul 2>nul
+    if not errorlevel 1 (
+        set "PYTHON_BOOTSTRAP_EXE=python"
+        set "PYTHON_BOOTSTRAP_ARGS="
+        exit /b 0
+    )
+)
+
+exit /b 1
