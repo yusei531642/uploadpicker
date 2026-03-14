@@ -30,14 +30,27 @@ def rebuild_faiss_index(session: Session) -> None:
     documents = session.exec(
         select(PhotoSearchDocument).where(PhotoSearchDocument.search_vector_path != "")
     ).all()
-    vectors: list[np.ndarray] = []
-    mapping: list[int] = []
+    collected: list[tuple[np.ndarray, int]] = []
     for document in documents:
         vector_path = Path(document.search_vector_path)
         if not vector_path.exists():
             continue
-        vectors.append(load_embedding(document.search_vector_path))
-        mapping.append(document.photo_id)
+        vector = load_embedding(document.search_vector_path)
+        collected.append((vector, document.photo_id))
+    if not collected:
+        if settings.faiss_index_path.exists():
+            settings.faiss_index_path.unlink()
+        if settings.faiss_mapping_path.exists():
+            settings.faiss_mapping_path.unlink()
+        return
+
+    dimension_counts: dict[int, int] = {}
+    for vector, _ in collected:
+        dimension_counts[vector.shape[0]] = dimension_counts.get(vector.shape[0], 0) + 1
+    target_dimension = max(dimension_counts, key=dimension_counts.get)
+
+    vectors = [vector for vector, _ in collected if vector.shape[0] == target_dimension]
+    mapping = [photo_id for vector, photo_id in collected if vector.shape[0] == target_dimension]
     if not vectors:
         if settings.faiss_index_path.exists():
             settings.faiss_index_path.unlink()

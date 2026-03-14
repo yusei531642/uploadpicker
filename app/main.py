@@ -1,3 +1,4 @@
+import os
 import subprocess
 from threading import Lock, Thread
 
@@ -14,9 +15,11 @@ from app.models import Photo, PhotoSearchDocument
 from app.schemas import SearchRequest
 from app.services.embedding import get_model_status, start_model_warmup
 from app.services.faiss_store import rebuild_faiss_index
+from app.services.faces import search_similar_faces
 from app.services.indexing import index_photo
 from app.services.search import search_photos
 from app.services.storage import iter_library_images, prepare_existing_image, save_upload
+from app.services.updater import get_local_update_status, get_update_status, launch_github_update
 
 
 ensure_directories()
@@ -131,6 +134,46 @@ def build_runtime_status() -> dict[str, object]:
     }
 
 
+def build_search_groups(search_results) -> list[dict[str, object]]:
+    if not search_results or not search_results.results:
+        return []
+
+    top_score = max(item.similarity for item in search_results.results)
+    strong_threshold = max(top_score - 0.03, 0.28)
+    medium_threshold = max(top_score - 0.08, 0.18)
+
+    groups = [
+        {
+            "title": "かなり近い候補" if search_results.mode != "face" else "かなり近い顔",
+            "description": "入力した内容にかなり近そうな画像です。" if search_results.mode != "face" else "基準画像とかなり近い顔の候補です。",
+            "tone": "strong",
+            "items": [],
+        },
+        {
+            "title": "近い候補" if search_results.mode != "face" else "近い顔",
+            "description": "条件に近いので、先に見ておくと探しやすい画像です。" if search_results.mode != "face" else "同じ人物の可能性があるので先に見ておきたい顔です。",
+            "tone": "medium",
+            "items": [],
+        },
+        {
+            "title": "参考候補" if search_results.mode != "face" else "参考の顔候補",
+            "description": "少し広めに拾った候補です。近い画像が少ないときの確認用です。" if search_results.mode != "face" else "少し広めに拾った顔候補です。似ている人が混ざることがあります。",
+            "tone": "soft",
+            "items": [],
+        },
+    ]
+
+    for item in search_results.results:
+        if item.similarity >= strong_threshold:
+            groups[0]["items"].append(item)
+        elif item.similarity >= medium_threshold:
+            groups[1]["items"].append(item)
+        else:
+            groups[2]["items"].append(item)
+
+    return [group for group in groups if group["items"]]
+
+
 @app.on_event("startup")
 def on_startup() -> None:
     create_db_and_tables()
@@ -155,11 +198,14 @@ def build_page_context(
         "documents": document_map,
         "app_status": build_runtime_status(),
         "search_results": search_results,
+        "search_groups": build_search_groups(search_results),
+        "search_mode": getattr(search_results, "mode", "text") if search_results else "text",
         "query": query,
         "people_only": people_only,
         "face_only": face_only,
         "library_dir": str(settings.image_dir.resolve()),
         "notice": notice,
+        "update_status": get_local_update_status(),
     }
 
 
@@ -218,10 +264,16 @@ def upload_batch(session: Session = Depends(get_session), files: list[UploadFile
 @app.post("/reindex")
 def reindex_all_photos(session: Session = Depends(get_session)):
     photos = session.exec(select(Photo).order_by(Photo.created_at.desc())).all()
+    reindexed = 0
+    skipped = 0
     for photo in photos:
-        index_photo(session, photo, refresh_index=False)
+        try:
+            index_photo(session, photo, refresh_index=False)
+            reindexed += 1
+        except (FileNotFoundError, UnidentifiedImageError, OSError):
+            skipped += 1
     rebuild_faiss_index(session)
-    return RedirectResponse(url="/?notice=再インデックスが完了しました。", status_code=303)
+    return RedirectResponse(url=f"/?notice=再インデックス完了: {reindexed}件更新 / {skipped}件スキップ", status_code=303)
 
 
 @app.post("/open-image-folder")
@@ -282,6 +334,23 @@ def search(request: Request, query: str = Form(...), people_only: bool = Form(Fa
     )
 
 
+@app.post("/search-face/{photo_id}", response_class=HTMLResponse)
+def search_face(request: Request, photo_id: int, session: Session = Depends(get_session)) -> HTMLResponse:
+    results = search_similar_faces(session, photo_id)
+    notice = "同じ人物っぽい顔を優先して探しています。"
+    if not results.results:
+        notice = "この画像では比較に使える顔を見つけられませんでした。別の画像でも試してください。"
+    return templates.TemplateResponse(
+        request,
+        "home.html",
+        build_page_context(
+            session,
+            search_results=results,
+            notice=notice,
+        ),
+    )
+
+
 @app.get("/api/model-status")
 def model_status_api():
     return build_runtime_status()
@@ -290,3 +359,14 @@ def model_status_api():
 @app.get("/api/search")
 def search_api(query: str, people_only: bool = False, face_only: bool = False, session: Session = Depends(get_session)):
     return search_photos(session, SearchRequest(query=query, people_only=people_only, face_only=face_only))
+
+
+@app.get("/api/update-status")
+def update_status_api():
+    return get_update_status()
+
+
+@app.post("/run-github-update")
+def run_github_update():
+    launch_github_update(os.getpid())
+    return RedirectResponse(url="/?notice=GitHubから更新を開始しました。数秒後に自動で再起動します。", status_code=303)

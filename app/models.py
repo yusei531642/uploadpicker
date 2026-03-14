@@ -27,3 +27,4 @@ class PhotoSearchDocument(SQLModel, table=True):
     has_person: bool = False
     has_face: bool = False
     search_vector_path: str = ""
+    face_vector_path: str = ""

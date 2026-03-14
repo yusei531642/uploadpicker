@@ -64,6 +64,19 @@
 
         <section class="panel stack-sm">
           <div class="section-head">
+            <h2>処理パイプライン</h2>
+            <span>4段階</span>
+          </div>
+          <div class="pipeline-list">
+            <div class="pipeline-step"><strong>1.</strong><span>CLIP で画像の意味特徴を作成</span></div>
+            <div class="pipeline-step"><strong>2.</strong><span>画像キャプションを自動生成</span></div>
+            <div class="pipeline-step"><strong>3.</strong><span>顔埋め込みを作って同じ人物を探せるようにする</span></div>
+            <div class="pipeline-step"><strong>4.</strong><span>ベクトル検索で候補を並べる</span></div>
+          </div>
+        </section>
+
+        <section class="panel stack-sm">
+          <div class="section-head">
             <h2>システム状態</h2>
             <span id="system-phase-label" class="state-badge" data-state-tone="{{ phase_tone }}">{{ phase_label }}</span>
           </div>
@@ -101,6 +114,40 @@
               <span>現在の検索結果</span>
             </div>
           </div>
+        </section>
+
+        <section class="panel stack-sm">
+          <div class="section-head">
+            <h2>アップデート</h2>
+            <span id="update-status-badge" class="state-badge" data-state-tone="loading">確認中</span>
+          </div>
+          <div class="info-list">
+            <div class="info-row"><span>現在の版</span><strong id="local-version-label">{{ update_status.app_version }}</strong></div>
+            <div class="info-row"><span>現在のコミット</span><strong id="local-commit-label">{{ update_status.local_commit_short or 'release版' }}</strong></div>
+            <div class="info-row"><span>GitHub最新</span><strong id="remote-commit-label">{{ update_status.remote_commit_short or '確認中' }}</strong></div>
+          </div>
+          <p id="update-detail" class="helper-text">
+            {% if update_status.update_check_error %}
+            {{ update_status.update_check_error }}
+            {% elif update_status.update_available == true %}
+            GitHub に新しい更新があります。
+            {% elif update_status.update_available == false %}
+            今の内容は GitHub と同じです。
+            {% else %}
+            GitHub と比較できない環境でも、そのまま更新は実行できます。
+            {% endif %}
+          </p>
+          <p id="update-meta" class="helper-text">
+            {% if update_status.remote_committed_at_label %}
+            最新更新: {{ update_status.remote_committed_at_label }}
+            {% else %}
+            最新更新日時を確認中です。
+            {% endif %}
+          </p>
+          <form action="/run-github-update" method="post">
+            <button class="button-secondary" type="submit">GitHub から更新する</button>
+          </form>
+          <span class="helper-text">更新では `data` と `.env` を残したまま、アプリ本体だけを入れ替えます。</span>
         </section>
       </aside>
 
@@ -206,24 +253,61 @@
             <h2>検索結果</h2>
             <span>{{ search_results.total }}件</span>
           </div>
-          <div class="card-grid">
-            {% for item in search_results.results %}
-            <article class="asset-card">
-              <img src="{{ item.thumbnail_url }}" alt="{{ item.original_name }}">
-              <div class="asset-body stack-sm">
-                <div class="asset-head">
-                  <strong>{{ item.original_name }}</strong>
-                  <span class="score-badge">score {{ '%.4f'|format(item.similarity) }}</span>
+          <p class="helper-text">
+            {% if search_mode == 'face' %}
+            顔埋め込みを使って、同じ人物っぽい順に並べています。
+            {% else %}
+            数字だけでなく、近さごとにまとまりで見られるようにしています。
+            {% endif %}
+          </p>
+          {% if search_groups %}
+          <div class="group-stack">
+            {% for group in search_groups %}
+            <section class="result-group" data-group-tone="{{ group.tone }}">
+              <div class="section-head result-group-head">
+                <div class="stack-sm">
+                  <h3>{{ group.title }}</h3>
+                  <p class="helper-text">{{ group.description }}</p>
                 </div>
-                <span class="asset-caption">{{ item.caption }}</span>
-                <div class="tag-row">
-                  {% for tag in item.auto_tags %}<span class="tag">{{ tag }}</span>{% endfor %}
-                  {% for tag in item.manual_tags %}<span class="tag manual">{{ tag }}</span>{% endfor %}
-                </div>
+                <span class="group-count">{{ group["items"]|length }}件</span>
               </div>
-            </article>
+              <div class="card-grid">
+                {% for item in group["items"] %}
+                <article class="asset-card">
+                  <img src="{{ item.thumbnail_url }}" alt="{{ item.original_name }}">
+                  <div class="asset-body stack-sm">
+                    <div class="asset-head">
+                      <strong>{{ item.original_name }}</strong>
+                      <span class="score-badge">一致度 {{ '%.4f'|format(item.similarity) }}</span>
+                    </div>
+                    <span class="asset-caption">{{ item.caption }}</span>
+                    {% if item.match_reasons %}
+                    <div class="reason-row">
+                      {% for reason in item.match_reasons %}<span class="reason-chip">{{ reason }}</span>{% endfor %}
+                    </div>
+                    {% endif %}
+                    <div class="tag-row">
+                      {% for tag in item.auto_tags %}<span class="tag">{{ tag }}</span>{% endfor %}
+                      {% for tag in item.manual_tags %}<span class="tag manual">{{ tag }}</span>{% endfor %}
+                    </div>
+                    {% if item.face_search_available %}
+                    <form action="/search-face/{{ item.id }}" method="post">
+                      <button class="button-secondary compact-button" type="submit">この顔で探す</button>
+                    </form>
+                    {% endif %}
+                  </div>
+                </article>
+                {% endfor %}
+              </div>
+            </section>
             {% endfor %}
           </div>
+          {% else %}
+          <div class="empty-state">
+            <strong>近い画像がまだ見つかっていません。</strong>
+            <span class="helper-text">言い換えて検索するか、画像を追加してからもう一度試してください。</span>
+          </div>
+          {% endif %}
         </section>
         {% endif %}
 
@@ -251,6 +335,11 @@
                   <span>人物 {{ document.person_count }}</span>
                   <span>顔 {{ document.face_count }}</span>
                 </div>
+                {% if document.face_vector_path %}
+                <form action="/search-face/{{ photo.id }}" method="post">
+                  <button class="button-secondary compact-button" type="submit">この顔で探す</button>
+                </form>
+                {% endif %}
                 {% else %}
                 <span class="asset-caption">検索データを準備中です。</span>
                 {% endif %}
@@ -277,6 +366,11 @@
     const systemDetail = document.getElementById('system-detail');
     const workspaceStatusMessage = document.getElementById('workspace-status-message');
     const heroSearchState = document.getElementById('hero-search-state');
+    const updateStatusBadge = document.getElementById('update-status-badge');
+    const updateDetail = document.getElementById('update-detail');
+    const updateMeta = document.getElementById('update-meta');
+    const localCommitLabel = document.getElementById('local-commit-label');
+    const remoteCommitLabel = document.getElementById('remote-commit-label');
     const pollingIntervalMs = 1200;
 
     function getPhaseLabel(status) {
@@ -306,6 +400,14 @@
       const response = await fetch('/api/model-status', { cache: 'no-store' });
       if (!response.ok) {
         throw new Error('status request failed');
+      }
+      return response.json();
+    }
+
+    async function refreshUpdateStatus() {
+      const response = await fetch('/api/update-status', { cache: 'no-store' });
+      if (!response.ok) {
+        throw new Error('update status request failed');
       }
       return response.json();
     }
@@ -357,6 +459,48 @@
       }
     }
 
+    function applyUpdateStatus(status) {
+      if (!updateStatusBadge) {
+        return;
+      }
+
+      let label = '確認中';
+      let tone = 'loading';
+      let detail = '更新状態を確認しています。';
+
+      if (status.update_check_error) {
+        label = '要確認';
+        tone = 'error';
+        detail = status.update_check_error;
+      } else if (status.update_available === true) {
+        label = '更新あり';
+        tone = 'loading';
+        detail = 'GitHub に新しい更新があります。必要ならここから上書き更新できます。';
+      } else if (status.update_available === false) {
+        label = '最新';
+        tone = 'ready';
+        detail = '今の内容は GitHub と同じです。';
+      } else {
+        label = '手動更新';
+        tone = 'loading';
+        detail = '比較はできませんが、このまま GitHub から更新できます。';
+      }
+
+      applyBadge(updateStatusBadge, label, tone);
+      if (updateDetail) {
+        updateDetail.textContent = detail;
+      }
+      if (updateMeta) {
+        updateMeta.textContent = status.remote_committed_at_label ? `最新更新: ${status.remote_committed_at_label}` : '最新更新日時を確認できませんでした。';
+      }
+      if (localCommitLabel) {
+        localCommitLabel.textContent = status.local_commit_short || 'release版';
+      }
+      if (remoteCommitLabel) {
+        remoteCommitLabel.textContent = status.remote_commit_short || '不明';
+      }
+    }
+
     async function pollAppStatus() {
       if (!overlay) {
         return;
@@ -373,6 +517,9 @@
     }
 
     pollAppStatus();
+    refreshUpdateStatus().then(applyUpdateStatus).catch(() => {
+      applyUpdateStatus({ update_check_error: 'GitHub の更新確認に失敗しました。' });
+    });
   </script>
 </body>
 </html>
