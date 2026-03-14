@@ -2,6 +2,8 @@
 setlocal
 set "PROJECT_ROOT=%~dp0"
 set "VENV_DIR=%PROJECT_ROOT%.venv"
+set "PYTHON_BOOTSTRAP_EXE="
+set "PYTHON_BOOTSTRAP_ARGS="
 set "PYTHON_EXE=%VENV_DIR%\Scripts\python.exe"
 set "ENV_EXAMPLE=%PROJECT_ROOT%.env.example"
 set "ENV_FILE=%PROJECT_ROOT%.env"
@@ -14,30 +16,39 @@ set "MENU_START=%START_MENU_DIR%\Start UploadPicker.bat"
 set "MENU_UNINSTALL=%START_MENU_DIR%\Uninstall UploadPicker.bat"
 
 where py >nul 2>nul
-if not errorlevel 1 (
-    set "PYTHON_CMD=py -3.11"
-    py -3.11 --version >nul 2>nul
-    if errorlevel 1 set "PYTHON_CMD=py -3"
-) else (
-    where python >nul 2>nul
-    if not errorlevel 1 (
-        set "PYTHON_CMD=python"
-    ) else (
-        echo Python was not found. Installing Python 3.11 via winget...
-        winget install --exact --id Python.Python.3.11 --accept-package-agreements --accept-source-agreements
-        if errorlevel 1 (
-            echo Failed to install Python.
-            pause
-            exit /b 1
-        )
-        set "PYTHON_CMD=py -3.11"
-    )
-)
+if not errorlevel 1 goto use_py_launcher
 
-echo Using Python command: %PYTHON_CMD%
+where python >nul 2>nul
+if not errorlevel 1 goto use_python
+
+echo Python was not found. Installing Python 3.11 via winget...
+winget install --exact --id Python.Python.3.11 --accept-package-agreements --accept-source-agreements
+if errorlevel 1 (
+    echo Failed to install Python.
+    pause
+    exit /b 1
+)
+set "PYTHON_BOOTSTRAP_EXE=py"
+set "PYTHON_BOOTSTRAP_ARGS=-3.11"
+goto python_ready
+
+:use_py_launcher
+set "PYTHON_BOOTSTRAP_EXE=py"
+set "PYTHON_BOOTSTRAP_ARGS=-3.11"
+py -3.11 --version >nul 2>nul
+if errorlevel 1 set "PYTHON_BOOTSTRAP_ARGS=-3"
+goto python_ready
+
+:use_python
+set "PYTHON_BOOTSTRAP_EXE=python"
+set "PYTHON_BOOTSTRAP_ARGS="
+
+:python_ready
+
+echo Using Python command: %PYTHON_BOOTSTRAP_EXE% %PYTHON_BOOTSTRAP_ARGS%
 
 if not exist "%VENV_DIR%" (
-    call %PYTHON_CMD% -m venv "%VENV_DIR%"
+    "%PYTHON_BOOTSTRAP_EXE%" %PYTHON_BOOTSTRAP_ARGS% -m venv "%VENV_DIR%"
     if errorlevel 1 (
         echo Failed to create virtual environment.
         pause
@@ -47,7 +58,7 @@ if not exist "%VENV_DIR%" (
 
 if exist "%ENV_EXAMPLE%" if not exist "%ENV_FILE%" copy "%ENV_EXAMPLE%" "%ENV_FILE%" >nul
 
-call "%PYTHON_EXE%" -m pip install --upgrade pip
+"%PYTHON_EXE%" -m pip install --upgrade pip
 if errorlevel 1 (
     echo Failed to upgrade pip.
     pause
@@ -55,7 +66,7 @@ if errorlevel 1 (
 )
 
 pushd "%PROJECT_ROOT%"
-call "%PYTHON_EXE%" -m pip install -e .
+"%PYTHON_EXE%" -m pip install -e .
 popd
 if errorlevel 1 (
     echo Failed to install UploadPicker.

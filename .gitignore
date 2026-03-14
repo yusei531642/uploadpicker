@@ -6,3 +6,4 @@ data/
 *.db
 *.sqlite3
 *.npy
+dist/

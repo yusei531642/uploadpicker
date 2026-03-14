@@ -1,5 +1,6 @@
 @echo off
-set SCRIPT_DIR=%~dp0
+setlocal
+set "SCRIPT_DIR=%~dp0"
 title UploadPicker
 
 :menu
@@ -12,23 +13,18 @@ echo 2. Start App
 echo 3. Uninstall
 echo 4. Exit
 echo.
-set /p CHOICE=Select [1-4]: 
-
-if "%CHOICE%"=="1" (
-    call "%SCRIPT_DIR%Install UploadPicker.bat"
-    goto menu
-)
-if "%CHOICE%"=="2" (
-    call "%SCRIPT_DIR%Start UploadPicker.bat"
-    goto menu
-)
-if "%CHOICE%"=="3" (
-    call "%SCRIPT_DIR%Uninstall UploadPicker.bat"
-    goto menu
-)
-if "%CHOICE%"=="4" exit /b 0
-
-echo.
-echo Invalid selection.
-pause
+choice /c 1234 /n /m "Select [1-4]: "
+if errorlevel 4 exit /b 0
+if errorlevel 3 call :run_action "%SCRIPT_DIR%Uninstall UploadPicker.bat"
+if errorlevel 2 call :run_action "%SCRIPT_DIR%Start UploadPicker.bat"
+if errorlevel 1 call :run_action "%SCRIPT_DIR%Install UploadPicker.bat"
 goto menu
+
+:run_action
+call "%~1"
+if errorlevel 1 (
+    echo.
+    echo The selected action ended with an error.
+    pause
+)
+exit /b 0
