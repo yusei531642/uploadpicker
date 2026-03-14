@@ -4,197 +4,375 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>UploadPicker</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231c6df2'/%3E%3Cpath d='M18 20h28v24H18z' fill='%23ffffff' fill-opacity='.16'/%3E%3Cpath d='M24 25h16v4H24zm0 10h10v4H24z' fill='%23ffffff'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="/static/app.css">
 </head>
-<body data-model-loading="{{ 'true' if model_status.loading else 'false' }}">
-  <div id="model-loading-overlay" class="loading-overlay{% if not model_status.loading %} hidden{% endif %}" aria-live="polite" aria-busy="{{ 'true' if model_status.loading else 'false' }}">
-    <div class="loading-card stack-sm">
-      <strong>画像認識AIをロード中</strong>
-      <span id="model-loading-message">モデルの初期化が終わるまでお待ちください。</span>
-      <span class="loading-meta">{{ model_status.model_name }} / {{ model_status.pretrained }} / {{ model_status.device }}</span>
-      {% if model_status.error %}
-      <div class="error-text" id="model-loading-error">{{ model_status.error }}</div>
-      {% else %}
-      <div class="loading-spinner" aria-hidden="true"></div>
-      {% endif %}
+{% set phase = app_status.phase %}
+{% set phase_label = '準備完了' if phase == 'ready' else '要確認' if phase == 'error' else '起動中' if phase == 'starting' else 'AIロード中' if phase == 'model-loading' else '索引準備中' if phase == 'index-loading' else '待機中' %}
+{% set phase_tone = 'ready' if phase == 'ready' else 'error' if phase == 'error' else 'loading' %}
+<body
+  data-app-loading="{{ 'true' if app_status.loading else 'false' }}"
+  data-app-phase="{{ phase }}"
+>
+  <div id="app-loading-overlay" class="startup-overlay{% if not app_status.loading and not app_status.error %} hidden{% endif %}" aria-live="polite" aria-busy="{{ 'true' if app_status.loading else 'false' }}">
+    <div class="startup-window">
+      <div class="window-controls" aria-hidden="true">
+        <span></span>
+        <span></span>
+        <span></span>
+      </div>
+      <p class="eyebrow">UploadPicker startup</p>
+      <h2>画像ライブラリを準備しています</h2>
+      <p id="app-loading-message" class="startup-message">{{ app_status.detail }}</p>
+      <div class="startup-meta">
+        <span id="app-loading-phase" class="state-badge" data-state-tone="{{ phase_tone }}">{{ phase_label }}</span>
+        <span class="meta-chip">{{ app_status.model_name }}</span>
+        <span class="meta-chip">{{ app_status.pretrained }}</span>
+        <span class="meta-chip">{{ app_status.device }}</span>
+      </div>
+      <div id="app-loading-error" class="error-box{% if not app_status.error %} hidden{% endif %}">{{ app_status.error or '' }}</div>
+      <div id="app-loading-progress" class="startup-progress{% if app_status.error %} hidden{% endif %}" aria-hidden="true">
+        <span></span>
+      </div>
+      <button id="app-loading-retry" class="button-secondary{% if not app_status.error %} hidden{% endif %}" type="button" onclick="window.location.reload()">再読み込み</button>
+      <p class="helper-text">初回起動や再インデックス直後は少し時間がかかることがあります。</p>
     </div>
   </div>
-  <main class="page">
-    <section class="hero">
-      <div>
-        <p class="eyebrow">Local GPU-ready hybrid image search</p>
-        <h1>UploadPicker</h1>
-        <p class="subtitle">アップロードした写真の中から、自然文と条件指定で候補をピックアップします。</p>
-      </div>
-      <div class="status-card">
-        <div class="status-row"><span>Device</span><strong>{{ model_status.device }}</strong></div>
-        {% if model_status.gpu_name %}
-        <div class="status-row"><span>GPU</span><strong>{{ model_status.gpu_name }}</strong></div>
-        {% endif %}
-        <div class="status-row"><span>Model</span><strong>{{ model_status.model_name }}</strong></div>
-        <div class="status-row"><span>Pretrained</span><strong>{{ model_status.pretrained }}</strong></div>
-        <div class="status-row"><span>Loading</span><strong>{{ model_status.loading }}</strong></div>
-        <div class="status-row"><span>Loaded</span><strong>{{ model_status.loaded }}</strong></div>
-        {% if model_status.dtype %}
-        <div class="status-row"><span>DType</span><strong>{{ model_status.dtype }}</strong></div>
-        {% endif %}
-        <div class="helper-text">{{ model_status.device_reason }}</div>
-        {% if model_status.error %}
-        <div class="error-text">{{ model_status.error }}</div>
-        {% endif %}
-      </div>
-    </section>
 
-    {% if notice %}
-    <section class="panel notice-banner">
-      <strong>{{ notice }}</strong>
-    </section>
-    {% endif %}
-
-    <section class="panel two-column">
-      <div class="stack">
-        <h2>アップロード</h2>
-        <form class="stack-sm" action="/upload" method="post" enctype="multipart/form-data">
-          <input type="file" name="file" accept="image/*" required>
-          <button type="submit">画像を1枚アップロード</button>
-        </form>
-        <form class="stack-sm" action="/upload-batch" method="post" enctype="multipart/form-data">
-          <input type="file" name="files" accept="image/*" multiple required>
-          <button type="submit">画像をまとめてアップロード</button>
-        </form>
-        <form class="stack-sm" action="/upload-batch" method="post" enctype="multipart/form-data">
-          <input type="file" name="files" accept="image/*" webkitdirectory directory multiple required>
-          <button type="submit">フォルダごとアップロード</button>
-        </form>
-        <span class="helper-text">複数画像を選ぶか、フォルダを丸ごと選んで一括登録できます。</span>
+  <div class="desktop-shell">
+    <header class="titlebar">
+      <div class="titlebar-brand">
+        <div class="brand-mark">UP</div>
+        <div>
+          <strong>UploadPicker</strong>
+          <span>ローカル画像検索ワークスペース</span>
+        </div>
       </div>
-
-      <form class="stack" action="/search" method="post">
-        <h2>検索</h2>
-        <input type="text" name="query" placeholder="例: やわらかい雰囲気の人物、カジュアルで明るい写真" value="{{ query }}" required>
-        <label class="check"><input type="checkbox" name="people_only" {% if people_only %}checked{% endif %}> 人物ありのみ</label>
-        <label class="check"><input type="checkbox" name="face_only" {% if face_only %}checked{% endif %}> 顔ありのみ</label>
-        <button type="submit">検索する</button>
-      </form>
-    </section>
-
-    <section class="panel stack">
-      <div class="section-head">
-        <h2>画像フォルダ取り込み</h2>
-        <span>{{ library_dir }}</span>
+      <div class="titlebar-status">
+        <span id="header-state-badge" class="state-badge" data-state-tone="{{ phase_tone }}">{{ phase_label }}</span>
+        <span class="meta-chip">{{ app_status.device }}</span>
       </div>
-      <p class="subtitle compact">画像をこのフォルダへまとめて入れてから取り込みボタンを押すと、一括で検索対象に登録できます。</p>
-      <div class="action-grid">
-        <form action="/open-image-folder" method="post">
-          <button class="button-secondary" type="submit">画像フォルダを開く</button>
-        </form>
-        <form action="/import-folder-images" method="post">
-          <button class="button-secondary" type="submit">フォルダ内画像を取り込む</button>
-        </form>
-        <form action="/reindex" method="post">
-          <button class="button-secondary" type="submit">全件再インデックス</button>
-        </form>
-      </div>
-    </section>
+    </header>
 
-    {% if search_results %}
-    <section class="panel stack">
-      <div class="section-head">
-        <h2>検索結果</h2>
-        <span>{{ search_results.total }}件</span>
-      </div>
-      <div class="grid results-grid">
-        {% for item in search_results.results %}
-        <article class="card image-card">
-          <img src="{{ item.thumbnail_url }}" alt="{{ item.original_name }}">
-          <div class="card-body stack-sm">
-            <strong>{{ item.original_name }}</strong>
-            <span>score: {{ '%.4f'|format(item.similarity) }}</span>
-            <span>{{ item.caption }}</span>
-            <div class="tag-row">
-              {% for tag in item.auto_tags %}<span class="tag">{{ tag }}</span>{% endfor %}
-              {% for tag in item.manual_tags %}<span class="tag manual">{{ tag }}</span>{% endfor %}
-            </div>
+    <div class="desktop-layout">
+      <aside class="sidebar">
+        <section class="panel stack-sm">
+          <p class="panel-kicker">Workspace</p>
+          <h1>画像検索ワークスペース</h1>
+          <p class="lead">アップロード、フォルダ取り込み、自然文検索を、デスクトップソフトっぽい1画面にまとめました。</p>
+        </section>
+
+        <section class="panel stack-sm">
+          <div class="section-head">
+            <h2>システム状態</h2>
+            <span id="system-phase-label" class="state-badge" data-state-tone="{{ phase_tone }}">{{ phase_label }}</span>
           </div>
-        </article>
-        {% endfor %}
-      </div>
-    </section>
-    {% endif %}
-
-    <section class="panel stack">
-      <div class="section-head">
-        <h2>登録済み画像</h2>
-        <span>{{ photos|length }}枚</span>
-      </div>
-      <div class="grid library-grid">
-        {% for photo in photos %}
-        {% set document = documents.get(photo.id) %}
-        <article class="card image-card">
-          <img src="/assets/thumbnails/{{ photo.stored_name }}" alt="{{ photo.original_name }}">
-          <div class="card-body stack-sm">
-            <strong>{{ photo.original_name }}</strong>
-            <span>{{ photo.width }} x {{ photo.height }}</span>
-            {% if document %}
-            <span>{{ document.caption }}</span>
-            <div class="tag-row">
-              {% for tag in document.auto_tags.split(',') if tag.strip() %}<span class="tag">{{ tag.strip() }}</span>{% endfor %}
-            </div>
+          <div class="info-list">
+            <div class="info-row"><span>AIモデル</span><strong id="system-model-status">{{ '準備完了' if app_status.loaded else '読み込み中' if app_status.loading else '待機中' }}</strong></div>
+            <div class="info-row"><span>検索索引</span><strong id="system-index-status">{{ '準備完了' if app_status.index_loaded else '準備中' if app_status.index_loading else '待機中' }}</strong></div>
+            <div class="info-row"><span>Device</span><strong>{{ app_status.device }}</strong></div>
+            {% if app_status.gpu_name %}
+            <div class="info-row"><span>GPU</span><strong>{{ app_status.gpu_name }}</strong></div>
+            {% endif %}
+            <div class="info-row"><span>Model</span><strong>{{ app_status.model_name }}</strong></div>
+            {% if app_status.dtype %}
+            <div class="info-row"><span>DType</span><strong>{{ app_status.dtype }}</strong></div>
             {% endif %}
           </div>
-        </article>
-        {% endfor %}
-      </div>
-    </section>
-  </main>
-  <script>
-    const overlay = document.getElementById('model-loading-overlay');
-    const loadingMessage = document.getElementById('model-loading-message');
-    const pollingIntervalMs = 1500;
+          <p id="system-detail" class="helper-text">{{ app_status.detail }}</p>
+          <p class="helper-text">{{ app_status.device_reason }}</p>
+          {% if app_status.error %}
+          <div class="error-box">{{ app_status.error }}</div>
+          {% endif %}
+        </section>
 
-    async function refreshModelStatus() {
+        <section class="panel stack-sm">
+          <div class="section-head">
+            <h2>クイック情報</h2>
+            <span>{{ photos|length }}枚</span>
+          </div>
+          <div class="metric-stack">
+            <div class="metric-card">
+              <strong>{{ photos|length }}</strong>
+              <span>登録済み画像</span>
+            </div>
+            <div class="metric-card">
+              <strong>{{ search_results.total if search_results else 0 }}</strong>
+              <span>現在の検索結果</span>
+            </div>
+          </div>
+        </section>
+      </aside>
+
+      <main class="workspace">
+        <section class="panel hero-panel">
+          <div class="hero-copy">
+            <p class="panel-kicker">Dashboard</p>
+            <h2>写真を入れて、文章で探す</h2>
+            <p class="lead">ブラウザのページというより、普段使いの管理ツールに近い見た目と流れに整えています。</p>
+            <div class="hero-metrics">
+              <div class="hero-metric">
+                <strong>{{ photos|length }}</strong>
+                <span>ライブラリ</span>
+              </div>
+              <div class="hero-metric">
+                <strong id="hero-search-state">{{ '準備完了' if app_status.loaded else '準備中' }}</strong>
+                <span>検索状態</span>
+              </div>
+              <div class="hero-metric">
+                <strong>{{ app_status.device|upper }}</strong>
+                <span>実行デバイス</span>
+              </div>
+            </div>
+          </div>
+          <div class="hero-status">
+            <span class="panel-kicker">現在の状態</span>
+            <strong id="workspace-status-message">{{ app_status.detail }}</strong>
+            <span class="helper-text">ロード中は画面操作を止めて、準備完了後にそのまま作業へ入れます。</span>
+          </div>
+        </section>
+
+        {% if notice %}
+        <section class="panel notice-banner">
+          <strong>{{ notice }}</strong>
+        </section>
+        {% endif %}
+
+        <section class="workspace-grid">
+          <section class="panel stack">
+            <div class="section-head">
+              <h2>取り込み</h2>
+              <span>手動追加</span>
+            </div>
+            <form class="stack-sm" action="/upload" method="post" enctype="multipart/form-data">
+              <label class="field-label" for="single-upload">画像を1枚追加</label>
+              <input id="single-upload" type="file" name="file" accept="image/*" required>
+              <button type="submit">1枚アップロード</button>
+            </form>
+            <form class="stack-sm" action="/upload-batch" method="post" enctype="multipart/form-data">
+              <label class="field-label" for="batch-upload">画像をまとめて追加</label>
+              <input id="batch-upload" type="file" name="files" accept="image/*" multiple required>
+              <button type="submit">複数画像を登録</button>
+            </form>
+            <form class="stack-sm" action="/upload-batch" method="post" enctype="multipart/form-data">
+              <label class="field-label" for="folder-upload">フォルダ単位で追加</label>
+              <input id="folder-upload" type="file" name="files" accept="image/*" webkitdirectory directory multiple required>
+              <button type="submit">フォルダを登録</button>
+            </form>
+            <span class="helper-text">「Choose Files」で複数選択、「フォルダを登録」でまとめ取り込みができます。</span>
+          </section>
+
+          <section class="panel stack">
+            <div class="section-head">
+              <h2>検索</h2>
+              <span>自然文</span>
+            </div>
+            <form class="stack" action="/search" method="post">
+              <label class="field-label" for="search-query">探したい内容を文章で入力</label>
+              <input id="search-query" type="text" name="query" placeholder="例: やわらかい雰囲気の人物、カジュアルで明るい写真" value="{{ query }}" required>
+              <label class="check"><input type="checkbox" name="people_only" {% if people_only %}checked{% endif %}> 人物ありのみ</label>
+              <label class="check"><input type="checkbox" name="face_only" {% if face_only %}checked{% endif %}> 顔ありのみ</label>
+              <button type="submit">検索する</button>
+            </form>
+          </section>
+        </section>
+
+        <section class="panel stack">
+          <div class="section-head">
+            <h2>フォルダ取り込み</h2>
+            <span>一括作業</span>
+          </div>
+          <div class="folder-bar">
+            <span class="field-label">監視対象フォルダ</span>
+            <code>{{ library_dir }}</code>
+          </div>
+          <p class="helper-text">このフォルダへ画像をまとめて入れてから取り込みを押すと、ライブラリへ一括登録できます。</p>
+          <div class="action-grid">
+            <form action="/open-image-folder" method="post">
+              <button class="button-secondary" type="submit">画像フォルダを開く</button>
+            </form>
+            <form action="/import-folder-images" method="post">
+              <button class="button-secondary" type="submit">フォルダ内画像を取り込む</button>
+            </form>
+            <form action="/reindex" method="post">
+              <button class="button-secondary" type="submit">全件再インデックス</button>
+            </form>
+          </div>
+        </section>
+
+        {% if search_results %}
+        <section class="panel stack">
+          <div class="section-head">
+            <h2>検索結果</h2>
+            <span>{{ search_results.total }}件</span>
+          </div>
+          <div class="card-grid">
+            {% for item in search_results.results %}
+            <article class="asset-card">
+              <img src="{{ item.thumbnail_url }}" alt="{{ item.original_name }}">
+              <div class="asset-body stack-sm">
+                <div class="asset-head">
+                  <strong>{{ item.original_name }}</strong>
+                  <span class="score-badge">score {{ '%.4f'|format(item.similarity) }}</span>
+                </div>
+                <span class="asset-caption">{{ item.caption }}</span>
+                <div class="tag-row">
+                  {% for tag in item.auto_tags %}<span class="tag">{{ tag }}</span>{% endfor %}
+                  {% for tag in item.manual_tags %}<span class="tag manual">{{ tag }}</span>{% endfor %}
+                </div>
+              </div>
+            </article>
+            {% endfor %}
+          </div>
+        </section>
+        {% endif %}
+
+        <section class="panel stack">
+          <div class="section-head">
+            <h2>登録済み画像</h2>
+            <span>{{ photos|length }}枚</span>
+          </div>
+          <div class="card-grid">
+            {% for photo in photos %}
+            {% set document = documents.get(photo.id) %}
+            <article class="asset-card">
+              <img src="/assets/thumbnails/{{ photo.stored_name }}" alt="{{ photo.original_name }}">
+              <div class="asset-body stack-sm">
+                <div class="asset-head">
+                  <strong>{{ photo.original_name }}</strong>
+                  <span class="score-badge">{{ photo.width }} x {{ photo.height }}</span>
+                </div>
+                {% if document %}
+                <span class="asset-caption">{{ document.caption }}</span>
+                <div class="tag-row">
+                  {% for tag in document.auto_tags.split(',') if tag.strip() %}<span class="tag">{{ tag.strip() }}</span>{% endfor %}
+                </div>
+                <div class="mini-stats">
+                  <span>人物 {{ document.person_count }}</span>
+                  <span>顔 {{ document.face_count }}</span>
+                </div>
+                {% else %}
+                <span class="asset-caption">検索データを準備中です。</span>
+                {% endif %}
+              </div>
+            </article>
+            {% endfor %}
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <script>
+    const overlay = document.getElementById('app-loading-overlay');
+    const loadingMessage = document.getElementById('app-loading-message');
+    const loadingPhase = document.getElementById('app-loading-phase');
+    const loadingError = document.getElementById('app-loading-error');
+    const loadingProgress = document.getElementById('app-loading-progress');
+    const loadingRetry = document.getElementById('app-loading-retry');
+    const headerStateBadge = document.getElementById('header-state-badge');
+    const systemPhaseLabel = document.getElementById('system-phase-label');
+    const systemModelStatus = document.getElementById('system-model-status');
+    const systemIndexStatus = document.getElementById('system-index-status');
+    const systemDetail = document.getElementById('system-detail');
+    const workspaceStatusMessage = document.getElementById('workspace-status-message');
+    const heroSearchState = document.getElementById('hero-search-state');
+    const pollingIntervalMs = 1200;
+
+    function getPhaseLabel(status) {
+      if (status.error) return '要確認';
+      if (status.loaded) return '準備完了';
+      if (status.phase === 'model-loading') return 'AIロード中';
+      if (status.phase === 'index-loading') return '索引準備中';
+      if (status.phase === 'starting') return '起動中';
+      return '待機中';
+    }
+
+    function getStateTone(status) {
+      if (status.error) return 'error';
+      if (status.loaded) return 'ready';
+      return 'loading';
+    }
+
+    function applyBadge(element, label, tone) {
+      if (!element) {
+        return;
+      }
+      element.textContent = label;
+      element.dataset.stateTone = tone;
+    }
+
+    async function refreshAppStatus() {
       const response = await fetch('/api/model-status', { cache: 'no-store' });
       if (!response.ok) {
-        throw new Error('model status request failed');
+        throw new Error('status request failed');
       }
       return response.json();
     }
 
-    function applyModelStatus(status) {
+    function applyAppStatus(status) {
+      const isBusy = Boolean(status.loading) || Boolean(status.error);
+      const label = getPhaseLabel(status);
+      const tone = getStateTone(status);
+
+      document.body.dataset.appLoading = isBusy ? 'true' : 'false';
+      document.body.dataset.appPhase = status.phase || 'idle';
+
+      if (overlay) {
+        overlay.classList.toggle('hidden', !isBusy);
+        overlay.setAttribute('aria-busy', status.loading ? 'true' : 'false');
+      }
+
+      applyBadge(loadingPhase, label, tone);
+      applyBadge(headerStateBadge, label, tone);
+      applyBadge(systemPhaseLabel, label, tone);
+
+      if (loadingMessage) {
+        loadingMessage.textContent = status.detail || '';
+      }
+      if (systemDetail) {
+        systemDetail.textContent = status.detail || '';
+      }
+      if (workspaceStatusMessage) {
+        workspaceStatusMessage.textContent = status.detail || '';
+      }
+      if (systemModelStatus) {
+        systemModelStatus.textContent = status.loaded ? '準備完了' : status.loading ? '読み込み中' : '待機中';
+      }
+      if (systemIndexStatus) {
+        systemIndexStatus.textContent = status.index_loaded ? '準備完了' : status.index_loading ? '準備中' : '待機中';
+      }
+      if (heroSearchState) {
+        heroSearchState.textContent = status.loaded ? '準備完了' : '準備中';
+      }
+      if (loadingError) {
+        loadingError.textContent = status.error || '';
+        loadingError.classList.toggle('hidden', !status.error);
+      }
+      if (loadingProgress) {
+        loadingProgress.classList.toggle('hidden', Boolean(status.error));
+      }
+      if (loadingRetry) {
+        loadingRetry.classList.toggle('hidden', !status.error);
+      }
+    }
+
+    async function pollAppStatus() {
       if (!overlay) {
         return;
       }
-      const isLoading = Boolean(status.loading);
-      document.body.dataset.modelLoading = isLoading ? 'true' : 'false';
-      overlay.classList.toggle('hidden', !isLoading);
-      overlay.setAttribute('aria-busy', isLoading ? 'true' : 'false');
-      if (loadingMessage) {
-        if (status.error) {
-          loadingMessage.textContent = 'モデル読み込みに失敗しました。画面を再読み込みして再試行してください。';
-        } else if (isLoading) {
-          loadingMessage.textContent = 'モデルの初期化が終わるまでお待ちください。';
-        } else {
-          loadingMessage.textContent = 'モデルの読み込みが完了しました。';
-        }
-      }
-    }
-
-    async function pollModelStatus() {
-      if (!overlay || document.body.dataset.modelLoading !== 'true') {
-        return;
-      }
       try {
-        const status = await refreshModelStatus();
-        applyModelStatus(status);
+        const status = await refreshAppStatus();
+        applyAppStatus(status);
         if (status.loading) {
-          window.setTimeout(pollModelStatus, pollingIntervalMs);
+          window.setTimeout(pollAppStatus, pollingIntervalMs);
         }
       } catch (_) {
-        window.setTimeout(pollModelStatus, pollingIntervalMs);
+        window.setTimeout(pollAppStatus, pollingIntervalMs);
       }
     }
 
-    pollModelStatus();
+    pollAppStatus();
   </script>
 </body>
 </html>

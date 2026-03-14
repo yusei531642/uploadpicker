@@ -18,6 +18,7 @@ _MODEL_STATUS: dict[str, object] = {
     "loaded": False,
     "dtype": None,
     "error": None,
+    "detail": "AI モデルの起動待機中です。",
 }
 
 
@@ -89,6 +90,12 @@ def _base_status() -> dict:
 
 def _load_model_in_background() -> None:
     try:
+        with _MODEL_STATUS_LOCK:
+            _MODEL_STATUS.update(
+                {
+                    "detail": "AI モデルを読み込んでいます。初回起動は少し時間がかかります。",
+                }
+            )
         model, _, _ = get_model_bundle()
         dtype = str(next(model.parameters()).dtype)
         with _MODEL_STATUS_LOCK:
@@ -99,6 +106,7 @@ def _load_model_in_background() -> None:
                     "loaded": True,
                     "dtype": dtype,
                     "error": None,
+                    "detail": "AI モデルの準備が完了しました。",
                 }
             )
     except Exception as exc:
@@ -110,6 +118,7 @@ def _load_model_in_background() -> None:
                     "loaded": False,
                     "dtype": None,
                     "error": str(exc),
+                    "detail": "AI モデルの読み込みに失敗しました。再読み込みしてください。",
                 }
             )
 
@@ -125,6 +134,7 @@ def start_model_warmup() -> None:
                 "loaded": False,
                 "dtype": None,
                 "error": None,
+                "detail": "AI モデルの起動準備を始めています。",
             }
         )
     Thread(target=_load_model_in_background, daemon=True).start()
@@ -146,6 +156,7 @@ def get_model_status() -> dict:
         "loaded": bool(status["loaded"]),
         "dtype": status["dtype"],
         "error": status["error"],
+        "detail": str(status["detail"]),
     }
 
 
