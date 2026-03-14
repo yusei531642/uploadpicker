@@ -6,7 +6,3 @@ data/
 *.db
 *.sqlite3
 *.npy
-build/
-dist/
-*.spec
-installer/certs/
