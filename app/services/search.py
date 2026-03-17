@@ -140,14 +140,22 @@ def _score_query_signals(photo: Photo, document: PhotoSearchDocument, signals: Q
     return bonus, reasons[:3]
 
 
-def search_photos(session: Session, payload: SearchRequest) -> SearchResponse:
-    query_vector = build_text_embedding(payload.query)
-    query_signals = _extract_query_signals(payload.query)
+def _build_photo_results(
+    session: Session,
+    query_vector,
+    *,
+    limit: int,
+    people_only: bool,
+    face_only: bool,
+    mode: str,
+    query: str,
+    query_signals: QuerySignals | None = None,
+) -> SearchResponse:
     statement = select(Photo, PhotoSearchDocument).join(PhotoSearchDocument, Photo.id == PhotoSearchDocument.photo_id)
     rows = session.exec(statement).all()
     rows_by_photo_id = {photo.id: (photo, document) for photo, document in rows}
 
-    candidate_scores = dict(search_index(query_vector, max(payload.limit * 8, 64)))
+    candidate_scores = dict(search_index(query_vector, max(limit * 8, 64)))
     ranked_photo_ids = list(candidate_scores.keys())
     if ranked_photo_ids:
         ordered_rows = [rows_by_photo_id[photo_id] for photo_id in ranked_photo_ids if photo_id in rows_by_photo_id]
@@ -156,20 +164,29 @@ def search_photos(session: Session, payload: SearchRequest) -> SearchResponse:
 
     results: list[PhotoResult] = []
     for photo, document in ordered_rows:
-        if payload.people_only and not document.has_person:
+        if people_only and not document.has_person:
             continue
-        if payload.face_only and not document.has_face:
+        if face_only and not document.has_face:
             continue
 
-        base_similarity = 0.0
-        if document.search_vector_path:
-            base_similarity = cosine_similarity(query_vector, load_embedding(document.search_vector_path))
+        base_similarity = candidate_scores.get(photo.id)
+        if base_similarity is None:
+            if document.search_vector_path:
+                base_similarity = cosine_similarity(query_vector, load_embedding(document.search_vector_path))
+            else:
+                base_similarity = 0.0
 
-        searchable_text = _build_searchable_text(photo, document)
-        keyword_bonus, keyword_reasons = _score_keyword_matches(searchable_text, query_signals.keywords)
-        signal_bonus, signal_reasons = _score_query_signals(photo, document, query_signals)
-        final_similarity = base_similarity + keyword_bonus + signal_bonus
-        match_reasons = list(dict.fromkeys(signal_reasons + keyword_reasons))
+        match_reasons: list[str] = []
+        final_similarity = base_similarity
+
+        if query_signals is not None:
+            searchable_text = _build_searchable_text(photo, document)
+            keyword_bonus, keyword_reasons = _score_keyword_matches(searchable_text, query_signals.keywords)
+            signal_bonus, signal_reasons = _score_query_signals(photo, document, query_signals)
+            final_similarity += keyword_bonus + signal_bonus
+            match_reasons = list(dict.fromkeys(signal_reasons + keyword_reasons))
+        elif final_similarity >= 0.25:
+            match_reasons = ["画像の見た目が近い"]
 
         results.append(
             PhotoResult(
@@ -188,5 +205,40 @@ def search_photos(session: Session, payload: SearchRequest) -> SearchResponse:
             )
         )
 
-    sorted_results = sorted(results, key=lambda item: item.similarity, reverse=True)[: payload.limit]
-    return SearchResponse(query=payload.query, total=len(sorted_results), mode="text", results=sorted_results)
+    sorted_results = sorted(results, key=lambda item: item.similarity, reverse=True)[:limit]
+    return SearchResponse(query=query, total=len(sorted_results), mode=mode, results=sorted_results)
+
+
+def search_photos(session: Session, payload: SearchRequest) -> SearchResponse:
+    query_vector = build_text_embedding(payload.query)
+    query_signals = _extract_query_signals(payload.query)
+    return _build_photo_results(
+        session,
+        query_vector,
+        limit=payload.limit,
+        people_only=payload.people_only,
+        face_only=payload.face_only,
+        mode="text",
+        query=payload.query,
+        query_signals=query_signals,
+    )
+
+
+def search_photos_by_image(
+    session: Session,
+    query_vector,
+    *,
+    limit: int = 24,
+    people_only: bool = False,
+    face_only: bool = False,
+    query_label: str = "画像検索",
+) -> SearchResponse:
+    return _build_photo_results(
+        session,
+        query_vector,
+        limit=limit,
+        people_only=people_only,
+        face_only=face_only,
+        mode="image",
+        query=query_label,
+    )

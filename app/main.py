@@ -1,3 +1,5 @@
+import base64
+import io
 import os
 import subprocess
 from threading import Lock, Thread
@@ -13,11 +15,11 @@ from app.config import ensure_directories, settings
 from app.db import create_db_and_tables, engine, get_session
 from app.models import Photo, PhotoSearchDocument
 from app.schemas import SearchRequest
-from app.services.embedding import get_model_status, start_model_warmup
+from app.services.embedding import build_image_embedding_from_pil, get_model_status, start_model_warmup
 from app.services.faiss_store import rebuild_faiss_index
 from app.services.faces import search_similar_faces
 from app.services.indexing import index_photo
-from app.services.search import search_photos
+from app.services.search import search_photos, search_photos_by_image
 from app.services.storage import iter_library_images, prepare_existing_image, save_upload
 from app.services.updater import get_local_update_status, get_update_status, launch_github_update
 
@@ -141,23 +143,25 @@ def build_search_groups(search_results) -> list[dict[str, object]]:
     top_score = max(item.similarity for item in search_results.results)
     strong_threshold = max(top_score - 0.03, 0.28)
     medium_threshold = max(top_score - 0.08, 0.18)
+    is_face_mode = search_results.mode == "face"
+    is_image_mode = search_results.mode == "image"
 
     groups = [
         {
-            "title": "かなり近い候補" if search_results.mode != "face" else "かなり近い顔",
-            "description": "入力した内容にかなり近そうな画像です。" if search_results.mode != "face" else "基準画像とかなり近い顔の候補です。",
+            "title": "かなり近い画像" if is_image_mode else "かなり近い候補" if not is_face_mode else "かなり近い顔",
+            "description": "アップした見本画像とかなり近そうな候補です。" if is_image_mode else "入力した内容にかなり近そうな画像です。" if not is_face_mode else "基準画像とかなり近い顔の候補です。",
             "tone": "strong",
             "items": [],
         },
         {
-            "title": "近い候補" if search_results.mode != "face" else "近い顔",
-            "description": "条件に近いので、先に見ておくと探しやすい画像です。" if search_results.mode != "face" else "同じ人物の可能性があるので先に見ておきたい顔です。",
+            "title": "近い画像" if is_image_mode else "近い候補" if not is_face_mode else "近い顔",
+            "description": "見本画像に近いので、先に見ておくと探しやすい候補です。" if is_image_mode else "条件に近いので、先に見ておくと探しやすい画像です。" if not is_face_mode else "同じ人物の可能性があるので先に見ておきたい顔です。",
             "tone": "medium",
             "items": [],
         },
         {
-            "title": "参考候補" if search_results.mode != "face" else "参考の顔候補",
-            "description": "少し広めに拾った候補です。近い画像が少ないときの確認用です。" if search_results.mode != "face" else "少し広めに拾った顔候補です。似ている人が混ざることがあります。",
+            "title": "参考画像" if is_image_mode else "参考候補" if not is_face_mode else "参考の顔候補",
+            "description": "少し広めに拾った候補です。近い画像が少ないときの確認用です。" if not is_face_mode else "少し広めに拾った顔候補です。似ている人が混ざることがあります。",
             "tone": "soft",
             "items": [],
         },
@@ -187,7 +191,11 @@ def build_page_context(
     query: str = "",
     people_only: bool = False,
     face_only: bool = False,
+    image_people_only: bool = False,
+    image_face_only: bool = False,
     search_results=None,
+    image_search_preview: str = "",
+    image_search_name: str = "",
     notice: str = "",
 ) -> dict:
     photos = session.exec(select(Photo).order_by(Photo.created_at.desc())).all()
@@ -203,10 +211,23 @@ def build_page_context(
         "query": query,
         "people_only": people_only,
         "face_only": face_only,
+        "image_people_only": image_people_only,
+        "image_face_only": image_face_only,
+        "image_search_preview": image_search_preview,
+        "image_search_name": image_search_name,
         "library_dir": str(settings.image_dir.resolve()),
         "notice": notice,
         "update_status": get_local_update_status(),
     }
+
+
+def build_search_preview_data_url(image) -> str:
+    preview = image.copy()
+    preview.thumbnail((360, 360))
+    buffer = io.BytesIO()
+    preview.save(buffer, format="JPEG", quality=88)
+    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+    return f"data:image/jpeg;base64,{encoded}"
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -330,6 +351,59 @@ def search(request: Request, query: str = Form(...), people_only: bool = Form(Fa
             people_only=people_only,
             face_only=face_only,
             search_results=results,
+        ),
+    )
+
+
+@app.post("/search-image", response_class=HTMLResponse)
+def search_image(
+    request: Request,
+    image_file: UploadFile = File(...),
+    people_only: bool = Form(False),
+    face_only: bool = Form(False),
+    session: Session = Depends(get_session),
+) -> HTMLResponse:
+    image_name = image_file.filename or "検索画像"
+    try:
+        image_bytes = image_file.file.read()
+        if not image_bytes:
+            raise UnidentifiedImageError("empty image")
+        with Image.open(io.BytesIO(image_bytes)) as uploaded_image:
+            rgb_image = uploaded_image.convert("RGB")
+            query_vector = build_image_embedding_from_pil(rgb_image)
+            preview_url = build_search_preview_data_url(rgb_image)
+    except (UnidentifiedImageError, OSError):
+        return templates.TemplateResponse(
+            request,
+            "home.html",
+            build_page_context(
+                session,
+                image_people_only=people_only,
+                image_face_only=face_only,
+                notice="画像を読み込めませんでした。PNG や JPG の画像で試してください。",
+            ),
+            status_code=400,
+        )
+    finally:
+        image_file.file.close()
+
+    results = search_photos_by_image(
+        session,
+        query_vector,
+        people_only=people_only,
+        face_only=face_only,
+        query_label=image_name,
+    )
+    return templates.TemplateResponse(
+        request,
+        "home.html",
+        build_page_context(
+            session,
+            image_people_only=people_only,
+            image_face_only=face_only,
+            search_results=results,
+            image_search_preview=preview_url,
+            image_search_name=image_name,
         ),
     )
 

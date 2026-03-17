@@ -209,19 +209,35 @@
             <span class="helper-text">「Choose Files」で複数選択、「フォルダを登録」でまとめ取り込みができます。</span>
           </section>
 
-          <section class="panel stack">
-            <div class="section-head">
-              <h2>検索</h2>
+        <section class="panel stack">
+          <div class="section-head">
+            <h2>検索</h2>
+            <span>文章 / 画像</span>
+          </div>
+          <form class="stack-sm search-form-block" action="/search" method="post">
+            <div class="section-head sub-head">
+              <h3>文章で探す</h3>
               <span>自然文</span>
             </div>
-            <form class="stack" action="/search" method="post">
-              <label class="field-label" for="search-query">探したい内容を文章で入力</label>
-              <input id="search-query" type="text" name="query" placeholder="例: やわらかい雰囲気の人物、カジュアルで明るい写真" value="{{ query }}" required>
-              <label class="check"><input type="checkbox" name="people_only" {% if people_only %}checked{% endif %}> 人物ありのみ</label>
-              <label class="check"><input type="checkbox" name="face_only" {% if face_only %}checked{% endif %}> 顔ありのみ</label>
-              <button type="submit">検索する</button>
-            </form>
-          </section>
+            <label class="field-label" for="search-query">探したい内容を文章で入力</label>
+            <input id="search-query" type="text" name="query" placeholder="例: やわらかい雰囲気の人物、カジュアルで明るい写真" value="{{ query }}" required>
+            <label class="check"><input type="checkbox" name="people_only" {% if people_only %}checked{% endif %}> 人物ありのみ</label>
+            <label class="check"><input type="checkbox" name="face_only" {% if face_only %}checked{% endif %}> 顔ありのみ</label>
+            <button type="submit">検索する</button>
+          </form>
+          <div class="panel-divider" aria-hidden="true"></div>
+          <form class="stack-sm search-form-block" action="/search-image" method="post" enctype="multipart/form-data">
+            <div class="section-head sub-head">
+              <h3>画像で探す</h3>
+              <span>見本画像</span>
+            </div>
+            <label class="field-label" for="image-search-file">切り取った画像や見本画像を選ぶ</label>
+            <input id="image-search-file" type="file" name="image_file" accept="image/*" required>
+            <label class="check"><input type="checkbox" name="people_only" {% if image_people_only %}checked{% endif %}> 人物ありのみ</label>
+            <label class="check"><input type="checkbox" name="face_only" {% if image_face_only %}checked{% endif %}> 顔ありのみ</label>
+            <button type="submit">画像で検索する</button>
+            <span class="helper-text">切り抜いた写真を1枚入れると、登録済み画像の中から見た目が近い候補を探します。</span>
+          </form>
         </section>
 
         <section class="panel stack">
@@ -256,10 +272,21 @@
           <p class="helper-text">
             {% if search_mode == 'face' %}
             顔埋め込みを使って、同じ人物っぽい順に並べています。
+            {% elif search_mode == 'image' %}
+            アップした見本画像の見た目に近い順で並べています。
             {% else %}
             数字だけでなく、近さごとにまとまりで見られるようにしています。
             {% endif %}
           </p>
+          {% if image_search_preview %}
+          <div class="search-preview">
+            <img src="{{ image_search_preview }}" alt="{{ image_search_name or '検索に使った画像' }}">
+            <div class="search-preview-body stack-sm">
+              <strong>検索に使った画像</strong>
+              <span class="asset-caption">{{ image_search_name or 'アップロード画像' }}</span>
+            </div>
+          </div>
+          {% endif %}
           {% if search_groups %}
           <div class="group-stack">
             {% for group in search_groups %}
