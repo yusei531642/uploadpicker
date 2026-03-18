@@ -3,12 +3,13 @@ import io
 import os
 import subprocess
 from threading import Lock, Thread
+from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from PIL import UnidentifiedImageError
+from PIL import Image, UnidentifiedImageError
 from sqlmodel import Session, select
 
 from app.config import ensure_directories, settings
@@ -19,6 +20,7 @@ from app.services.embedding import build_image_embedding_from_pil, get_model_sta
 from app.services.faiss_store import rebuild_faiss_index
 from app.services.faces import search_similar_faces
 from app.services.indexing import index_photo
+from app.services.library import clear_library, delete_photo
 from app.services.search import search_photos, search_photos_by_image
 from app.services.storage import iter_library_images, prepare_existing_image, save_upload
 from app.services.updater import get_local_update_status, get_update_status, launch_github_update
@@ -334,6 +336,23 @@ def import_folder_images(session: Session = Depends(get_session)):
         imported += 1
     rebuild_faiss_index(session)
     return RedirectResponse(url=f"/?notice=フォルダ取り込み完了: {imported}件追加 / {skipped}件スキップ", status_code=303)
+
+
+@app.post("/photos/{photo_id}/delete")
+def delete_registered_photo(photo_id: int, session: Session = Depends(get_session)):
+    deleted = delete_photo(session, photo_id)
+    notice = "画像を一覧から削除しました。" if deleted else "削除したい画像が見つかりませんでした。"
+    return RedirectResponse(url=f"/?notice={quote(notice)}", status_code=303)
+
+
+@app.post("/photos/clear")
+def clear_registered_photos(session: Session = Depends(get_session)):
+    deleted_count = clear_library(session)
+    if deleted_count:
+        notice = f"登録済み画像を {deleted_count} 件まとめて削除しました。"
+    else:
+        notice = "削除する登録済み画像はありませんでした。"
+    return RedirectResponse(url=f"/?notice={quote(notice)}", status_code=303)
 
 
 @app.post("/search", response_class=HTMLResponse)

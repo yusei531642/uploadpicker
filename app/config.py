@@ -5,7 +5,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     app_name: str = "UploadPicker"
-    app_version: str = "0.1.1"
+    app_version: str = "0.1.2"
     host: str = "127.0.0.1"
     port: int = 8000
     project_root: Path = Path(".")

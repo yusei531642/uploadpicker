@@ -125,7 +125,8 @@ p {
 .hero-metrics,
 .tag-row,
 .mini-stats,
-.reason-row {
+.reason-row,
+.library-toolbar {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
@@ -352,6 +353,16 @@ p {
   margin: 0;
 }
 
+.library-toolbar {
+  justify-content: space-between;
+  align-items: center;
+}
+
+.library-toolbar form {
+  margin: 0;
+  width: auto;
+}
+
 input[type="text"],
 input[type="file"],
 button {
@@ -417,6 +428,15 @@ button:hover {
 .button-secondary:hover {
   background: rgba(28, 109, 242, 0.08);
   transform: translateY(-1px);
+}
+
+.button-danger {
+  background: linear-gradient(180deg, #e45b5b 0%, #cf3f3f 100%);
+}
+
+.button-danger:hover {
+  background: linear-gradient(180deg, #db4c4c 0%, #bc2f2f 100%);
+  box-shadow: 0 14px 24px rgba(207, 63, 63, 0.22);
 }
 
 .compact-button {
@@ -746,6 +766,14 @@ button:hover {
   .folder-bar {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .library-toolbar {
+    align-items: stretch;
+  }
+
+  .library-toolbar form {
+    width: 100%;
   }
 
   .action-grid {

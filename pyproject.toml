@@ -1,6 +1,6 @@
 [project]
 name = "uploadpicker"
-version = "0.1.1"
+version = "0.1.2"
 description = "Local GPU-ready hybrid image search tool"
 readme = "README.md"
 requires-python = ">=3.11"

@@ -344,6 +344,13 @@
             <h2>登録済み画像</h2>
             <span>{{ photos|length }}枚</span>
           </div>
+          <div class="library-toolbar">
+            <span class="helper-text">不要になった画像は1枚ずつ消すか、まとめて一覧を空にできます。</span>
+            <form action="/photos/clear" method="post" onsubmit="return window.confirm('登録済み画像を全部削除します。よろしいですか？');">
+              <button class="button-danger" type="submit">登録済み画像を全部消す</button>
+            </form>
+          </div>
+          {% if photos %}
           <div class="card-grid">
             {% for photo in photos %}
             {% set document = documents.get(photo.id) %}
@@ -371,10 +378,19 @@
                 {% else %}
                 <span class="asset-caption">検索データを準備中です。</span>
                 {% endif %}
+                <form action="/photos/{{ photo.id }}/delete" method="post" onsubmit="return window.confirm('この画像を登録済み一覧から削除します。よろしいですか？');">
+                  <button class="button-danger compact-button" type="submit">この画像を消す</button>
+                </form>
               </div>
             </article>
             {% endfor %}
           </div>
+          {% else %}
+          <div class="empty-state">
+            <strong>まだ登録済み画像はありません。</strong>
+            <span class="helper-text">上の取り込みエリアから画像を追加すると、ここに並びます。</span>
+          </div>
+          {% endif %}
         </section>
       </main>
     </div>
